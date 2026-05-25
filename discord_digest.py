@@ -1,35 +1,41 @@
 """
-Discord channel digest: fetches messages, extracts URLs, summarizes via Anthropic, saves markdown.
+Discord channel digest: fetches messages, extracts URLs, summarizes via AI, saves markdown.
 
 Dependencies:
     pip install requests beautifulsoup4 anthropic python-dotenv
+    pip install openai   # only needed if AI_PROVIDER=openai
 
 Usage:
     python discord_digest.py
 
-Environment variables (override defaults):
+Environment variables:
     DISCORD_BOT_TOKEN   - Discord bot token
-    ANTHROPIC_API_KEY   - Anthropic API key
+    AI_PROVIDER         - anthropic (default) | openai | ollama
+    ANTHROPIC_API_KEY   - required when AI_PROVIDER=anthropic
+    OPENAI_API_KEY      - required when AI_PROVIDER=openai
 """
 
 import os
 import re
-from dotenv import load_dotenv
-
-load_dotenv()
 import sys
 import json
 import datetime
+import urllib.parse
+from pathlib import Path
+from dotenv import load_dotenv
 import requests
 from bs4 import BeautifulSoup
-import anthropic
+import db
+import providers
+
+BASE_DIR = Path(__file__).parent
+load_dotenv(BASE_DIR / ".env", override=True)
 
 # ---------------------------------------------------------------------------
 # Configuration — override with environment variables for security
 # ---------------------------------------------------------------------------
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 CHANNEL_ID = os.environ.get("DISCORD_CHANNEL_ID", "1506358200385929438")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # How many messages to fetch (max 100 per Discord API call)
 MESSAGE_LIMIT = 100
@@ -37,8 +43,8 @@ MESSAGE_LIMIT = 100
 # Max characters of page content to send to the model
 CONTENT_MAX_CHARS = 8_000
 
-# Output file
-OUTPUT_FILE = "digest.md"
+DIGESTS_DIR = BASE_DIR / "digests"
+DB_FILE = BASE_DIR / "links.db"
 
 # ---------------------------------------------------------------------------
 # Discord helpers
@@ -83,56 +89,29 @@ FETCH_HEADERS = {
 }
 
 
-def fetch_page_text(url: str) -> str | None:
-    """Fetch a URL and return its plain-text content, or None on failure."""
+def fetch_page_text(url: str) -> tuple[str, str | None] | tuple[None, None]:
+    """Fetch a URL and return (text, title). Both are None on failure."""
     try:
         resp = requests.get(url, headers=FETCH_HEADERS, timeout=15, allow_redirects=True)
         resp.raise_for_status()
         content_type = resp.headers.get("content-type", "")
         if "html" in content_type:
             soup = BeautifulSoup(resp.text, "html.parser")
+            title_tag = soup.find("title")
+            title = title_tag.get_text(strip=True) if title_tag else None
             # Remove script/style noise
             for tag in soup(["script", "style", "nav", "footer", "header"]):
                 tag.decompose()
             text = soup.get_text(separator="\n", strip=True)
+            return text[:CONTENT_MAX_CHARS], title
         elif "json" in content_type:
             text = json.dumps(resp.json(), indent=2)
         else:
             text = resp.text
-        return text[:CONTENT_MAX_CHARS]
+        return text[:CONTENT_MAX_CHARS], None
     except Exception as exc:
         print(f"  [warn] Could not fetch {url}: {exc}", file=sys.stderr)
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Anthropic summarization
-# ---------------------------------------------------------------------------
-
-def make_anthropic_client() -> anthropic.Anthropic:
-    if ANTHROPIC_API_KEY:
-        return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    return anthropic.Anthropic()  # falls back to ANTHROPIC_API_KEY env var
-
-
-def summarize(client: anthropic.Anthropic, url: str, content: str) -> str:
-    """Return a concise summary of the page content."""
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=512,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Summarize the following web page content in 3–5 sentences. "
-                    f"Focus on the key points a reader would want to know.\n\n"
-                    f"URL: {url}\n\n"
-                    f"---\n{content}\n---"
-                ),
-            }
-        ],
-    )
-    return message.content[0].text.strip()
+        return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +160,11 @@ def main() -> None:
     if not DISCORD_BOT_TOKEN:
         sys.exit("Error: DISCORD_BOT_TOKEN environment variable is not set.")
 
+    db.init_db(DB_FILE)
+    migrated = db.migrate_from_json(DB_FILE, BASE_DIR / "processed_links.json")
+    if migrated:
+        print(f"  Migrated {migrated} link(s) from processed_links.json to SQLite.")
+
     print(f"Fetching messages from channel {CHANNEL_ID}...")
     try:
         messages = fetch_messages(CHANNEL_ID, MESSAGE_LIMIT)
@@ -208,25 +192,43 @@ def main() -> None:
 
     print(f"  {len(url_meta)} unique URL(s) found.")
 
-    client = make_anthropic_client()
+    url_meta = {u: m for u, m in url_meta.items() if not db.is_processed(DB_FILE, u)}
+    if not url_meta:
+        sys.exit("No new links to process — all have been summarized before.")
+    print(f"  {len(url_meta)} new (unprocessed) URL(s) to summarize.")
+
+    today = datetime.date.today().strftime("%Y-%m-%d")
     entries: list[dict] = []
 
     for url, meta in url_meta.items():
         print(f"Processing: {url}")
-        content = fetch_page_text(url)
+        content, title = fetch_page_text(url)
+        source = urllib.parse.urlparse(url).netloc
         entry = {"url": url, **meta}
         if content:
             print(f"  Summarizing...")
             try:
-                entry["summary"] = summarize(client, url, content)
+                entry["summary"] = providers.summarize(url, content)
+                db.save_link(
+                    DB_FILE,
+                    url=url,
+                    date_processed=today,
+                    source=source,
+                    title=title,
+                    summary=entry["summary"],
+                    author=meta.get("author"),
+                    discord_ts=meta.get("timestamp"),
+                )
             except Exception as exc:
                 entry["error"] = f"Summarization failed: {exc}"
         else:
             entry["error"] = "Could not retrieve page content."
         entries.append(entry)
 
-    write_digest(entries, OUTPUT_FILE)
-    print(f"\nDigest saved to: {OUTPUT_FILE}")
+    os.makedirs(DIGESTS_DIR, exist_ok=True)
+    output_path = DIGESTS_DIR / f"digest-{today}.md"
+    write_digest(entries, output_path)
+    print(f"\nDigest saved to: {output_path}")
 
 
 if __name__ == "__main__":
