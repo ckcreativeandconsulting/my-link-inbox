@@ -1,0 +1,6 @@
+anthropic==0.103.1
+beautifulsoup4==4.14.3
+chromadb==1.5.9
+openai==2.26.0
+python-dotenv==1.2.2
+requests==2.32.5

@@ -1,3 +1,7 @@
 .env
 digest.md
+digests/
+processed_links.json
+links.db
+.chromadb/
 .claude/
