@@ -83,6 +83,20 @@ def ensure_ollama() -> None:
             detail = resp.json().get("error", resp.text)
         except Exception:
             detail = resp.text
+        if "cuda" in detail.lower():
+            raise RuntimeError(
+                f"CUDA error loading '{model}' — the GPU driver failed to initialise.\n\n"
+                "Fix options (pick one — edit .env then re-run):\n"
+                "  1. Restart Ollama to clear stale GPU state:\n"
+                "       taskkill /IM ollama.exe /F\n"
+                "  2. Force CPU mode (slower, always works):\n"
+                "       OLLAMA_NUM_GPU_LAYERS=0\n"
+                "  3. Use a smaller model that needs less VRAM:\n"
+                "       OLLAMA_MODEL=qwen2.5:7b   (first: ollama pull qwen2.5:7b)\n"
+                "  4. Switch to cloud AI (no GPU needed, costs API credits):\n"
+                "       AI_PROVIDER=anthropic\n\n"
+                f"Raw error: {detail}"
+            )
         raise RuntimeError(
             f"Model pre-warm failed ({resp.status_code}): {detail}\n"
             f"Run 'ollama pull {model}' if the model is not downloaded."
