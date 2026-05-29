@@ -7,7 +7,87 @@ Supported providers (set AI_PROVIDER in .env):
 """
 
 import os
+import subprocess
+import time
 import requests
+
+
+# ---------------------------------------------------------------------------
+# Public: ensure Ollama is running and the model is loaded (ollama provider only)
+# ---------------------------------------------------------------------------
+
+def ensure_ollama() -> None:
+    """Ensure Ollama is running and the configured model is loaded.
+
+    1. Health-checks Ollama via GET /api/tags.
+    2. If not reachable, starts 'ollama serve' as a detached background process
+       and waits up to 30 s for it to become available.
+    3. Sends a trivial 'Hi' prompt to force the model to load into VRAM before
+       real summarization begins — avoids read-timeout on the first real request.
+
+    No-op when AI_PROVIDER != ollama.
+    """
+    provider = os.environ.get("AI_PROVIDER", "anthropic").lower()
+    if provider != "ollama":
+        return
+
+    base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    model = os.environ.get("OLLAMA_MODEL", "qwen2.5:14b")
+
+    # --- Step 1: health check ---
+    def _is_up() -> bool:
+        try:
+            r = requests.get(f"{base_url}/api/tags", timeout=3)
+            return r.ok
+        except Exception:
+            return False
+
+    if not _is_up():
+        print("  Ollama not running — starting 'ollama serve'...")
+        kwargs: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+        if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            # Windows: detach so the process outlives this script
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(["ollama", "serve"], **kwargs)
+
+        for i in range(30):
+            time.sleep(1)
+            if _is_up():
+                print(f"  Ollama ready ({i + 1}s).")
+                break
+        else:
+            raise RuntimeError(
+                "Ollama did not start within 30 seconds. "
+                "Try running 'ollama serve' manually in a terminal."
+            )
+
+    # --- Step 2: pre-warm the model ---
+    print(f"  Pre-warming model '{model}'...")
+    try:
+        resp = requests.post(
+            f"{base_url}/api/chat",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": False,
+            },
+            timeout=300,  # generous: cold load of a 14b model can take 2–3 min
+        )
+    except requests.exceptions.Timeout:
+        raise RuntimeError(
+            f"Model '{model}' took longer than 5 minutes to load. "
+            "Try a smaller model (e.g. OLLAMA_MODEL=qwen2.5:7b) or check GPU memory."
+        )
+    if not resp.ok:
+        try:
+            detail = resp.json().get("error", resp.text)
+        except Exception:
+            detail = resp.text
+        raise RuntimeError(
+            f"Model pre-warm failed ({resp.status_code}): {detail}\n"
+            f"Run 'ollama pull {model}' if the model is not downloaded."
+        )
+    print("  Model ready.")
 
 
 # ---------------------------------------------------------------------------

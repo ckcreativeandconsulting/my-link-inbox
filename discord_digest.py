@@ -165,6 +165,11 @@ def main() -> None:
     if migrated:
         print(f"  Migrated {migrated} link(s) from processed_links.json to SQLite.")
 
+    try:
+        providers.ensure_ollama()
+    except RuntimeError as exc:
+        sys.exit(f"Ollama setup failed: {exc}")
+
     print(f"Fetching messages from channel {CHANNEL_ID}...")
     try:
         messages = fetch_messages(CHANNEL_ID, MESSAGE_LIMIT)
