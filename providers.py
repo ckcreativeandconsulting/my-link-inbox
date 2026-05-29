@@ -7,6 +7,7 @@ Supported providers (set AI_PROVIDER in .env):
 """
 
 import os
+import re
 import subprocess
 import time
 import requests
@@ -189,14 +190,28 @@ def _route(prompt: str) -> str:
 
 _SUMMARIZE_PROMPT = (
     "Summarize the following web page content in 3–5 sentences. "
-    "Focus on the key points a reader would want to know.\n\n"
+    "Focus on the key points a reader would want to know. "
+    "Begin the summary directly — do not include any introductory line "
+    "such as 'Here is a summary' or 'The following is a summary'.\n\n"
     "URL: {url}\n\n---\n{content}\n---"
 )
+
+_PREAMBLE_RE = re.compile(
+    r"^(here(?:'s| is)\b[^\n]*|the following is[^\n]*"
+    r"|this (?:article|page|post|web page)[^\n]*summary[^\n]*)\n+",
+    re.IGNORECASE,
+)
+
+
+def _strip_preamble(text: str) -> str:
+    """Remove common model preamble lines that precede the actual summary."""
+    return _PREAMBLE_RE.sub("", text).strip()
 
 
 def summarize(url: str, content: str) -> str:
     """Summarize page content using the configured AI provider."""
-    return _route(_SUMMARIZE_PROMPT.format(url=url, content=content))
+    result = _route(_SUMMARIZE_PROMPT.format(url=url, content=content))
+    return _strip_preamble(result)
 
 
 # ---------------------------------------------------------------------------
