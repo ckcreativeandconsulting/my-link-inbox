@@ -1,34 +1,26 @@
-# MyLinkInbox 📬
+# My Link Inbox 📬
 
-> A personal reading intelligence system — summarize articles before you commit to reading them, build a searchable knowledge base of everything you've saved, and query your entire reading history in natural language.
+A community intelligence pipeline that ingests Discord conversations and produces structured, LLM-generated digests — automatically extracting signal from noise across high-volume channels.
 
 ---
 
 ## Why I Built This
 
-I read a lot. Substack newsletters, X threads, news sites, long-form articles — there's more interesting content published every day than any person can meaningfully consume. The problem isn't finding content, it's triage: deciding *what's actually worth reading* before investing 10–20 minutes in it.
+Anyone active in multiple Discord communities knows the problem: valuable information gets buried in hundreds of messages per day. Keeping up manually is a part-time job. Ignoring it means missing important context, links, and discussions that are actually relevant to your work.
 
-I wanted a system that would:
-- **Summarize articles before I read them** — so I could decide in 30 seconds whether something deserved my full attention
-- **Build a searchable archive** of everything I'd saved — so "I know I read something about X last month" actually returns an answer
-- **Work with local AI** — so I could run it free and keep my reading history completely private
-- **Require zero manual effort** — no tagging, no categorizing, no friction
+My Link Inbox solves this by treating Discord channels as a structured data source — ingesting messages, filtering for signal, and producing clean summaries that take two minutes to read instead of two hours.
 
-For the delivery mechanism I wanted something free and low-friction. Discord fit perfectly — I already use it, I can drop links from any device in seconds, and the bot can read from a dedicated channel automatically. Discord is the input pipe, not the point.
-
-The result is a daily driver: drop links throughout the day, run the pipeline each morning, and have a summarized digest plus a searchable knowledge base of everything I've ever saved.
+This project is also part of a broader AI orchestration system — [AI Ops](https://github.com/ckcreativeandconsulting/ai-ops) — which can schedule and trigger My Link Inbox automatically on a defined cadence.
 
 ---
 
 ## What It Does
 
-Each time you run it:
-
-1. **Fetches** links you've dropped into a dedicated Discord channel
-2. **Scrapes** each page for its full text content
-3. **Summarizes** in 3–5 sentences using the AI provider of your choice — Claude, GPT-4, or a local Ollama model (fully offline, no API costs)
-4. **Saves** a dated Markdown digest and persists everything to SQLite
-5. **Indexes** summaries into ChromaDB so your entire reading history is semantically searchable
+- **Ingests Discord channel messages** on a configurable schedule
+- **Filters for high-signal content** — links, announcements, discussions with high engagement
+- **Generates structured digests** using LLMs — organized by topic, not just chronologically
+- **Delivers summaries** in a clean, readable format
+- **Maintains an inbox** of saved links and references for later review
 
 A companion CLI lets you query everything you've saved:
 
@@ -38,6 +30,17 @@ python search.py "economy articles" --top-k 20
 ```
 
 Search combines semantic similarity (ChromaDB vectors) and keyword matching (SQLite `LIKE`) — so you get both conceptual relevance and exact-term recall.
+
+---
+
+## The Pattern This Represents
+
+The underlying architecture — ingest unstructured communications, extract signal, produce structured summaries — is reusable across many business contexts:
+
+- Internal Slack channels drowning in noise
+- Customer support ticket summarization
+- Community feedback aggregation
+- Competitive intelligence monitoring
 
 ---
 
@@ -52,6 +55,19 @@ One of the core design goals was being able to run this entirely locally — no 
 | Anthropic Claude | API costs | Cloud | Excellent |
 
 Switch providers via a single config setting. For local use, any Ollama-compatible model works.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Language | Python 3.10+ |
+| Persistence | SQLite (summaries + metadata), ChromaDB (vector index) |
+| Embeddings | Ollama `all-minilm` — local, 45 MB, runs on CPU |
+| AI providers | Anthropic Claude · OpenAI GPT · Ollama local LLMs |
+| Web scraping | `requests` + `BeautifulSoup` |
+| Discord | REST API v10 via `requests` (no Discord SDK needed) |
 
 ---
 
@@ -115,16 +131,16 @@ AI Ops (Orchestrator)
 └── My Link Inbox    ← this repo
 ```
 
-When run through [AI Ops](https://github.com/ckcreativeandconsulting/ai-ops), My Link Inbox is triggered on a schedule automatically — so the digest is ready each morning without any manual intervention.
+When run through AI Ops, My Link Inbox is triggered on a schedule, its outputs are logged centrally, and summaries are routed automatically. See the [AI Ops repo](https://github.com/ckcreativeandconsulting/ai-ops) for details.
 
 ---
 
 ## Key Learnings
 
-- **Summarization prompt design is harder than it looks** — a naive "summarize this" prompt loses the specific details that make a summary actionable. The best prompts explicitly ask for the core argument, key evidence, and why it matters.
-- **Local AI is genuinely viable for this use case** — summarization doesn't require frontier model quality. A well-configured local Ollama model produces summaries good enough to make read/skip decisions, with zero API cost and full privacy.
-- **Semantic search changes how you relate to your reading history** — keyword search forces you to remember exact terms. Semantic search lets you query by concept, which is how memory actually works.
-- **Discord as infrastructure is underrated** — using it as an input pipe means the system works from any device, requires no custom app, and has zero ongoing maintenance. Sometimes the right architecture decision is the boring one.
+- **Prompt design for summarization is harder than it looks** — naive summarization loses the links and references that make digests actually useful
+- **Discord's API has rate limits that require careful batching** — this is a microcosm of the real-world data engineering challenges in any pipeline
+- **The most useful output format turned out to be topic-clustered rather than chronological** — LLMs are surprisingly good at inferring topic groupings from message context
+- **This pattern (ingest → filter → summarize → deliver) is one of the highest-value AI use cases** for any organization with high-volume unstructured communications
 
 ---
 
