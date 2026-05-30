@@ -5,3 +5,4 @@ processed_links.json
 links.db
 .chromadb/
 .claude/
+__pycache__/
