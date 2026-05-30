@@ -1,81 +1,76 @@
-# MyLinkInbox
+# MyLinkInbox 📬
 
-> Automatically summarizes links shared in a Discord channel, builds searchable daily digests, and lets you ask natural-language questions across your entire reading history.
+> A personal reading intelligence system — summarize articles before you commit to reading them, build a searchable knowledge base of everything you've saved, and query your entire reading history in natural language.
 
 ---
 
-## What it does
+## Why I Built This
 
-A Discord channel I'm in shares 30–50 links a day — articles, newsletters, and long reads. They disappear into the scroll. This tool fixes that.
+I read a lot. Substack newsletters, X threads, news sites, long-form articles — there's more interesting content published every day than any person can meaningfully consume. The problem isn't finding content, it's triage: deciding *what's actually worth reading* before investing 10–20 minutes in it.
+
+I wanted a system that would:
+- **Summarize articles before I read them** — so I could decide in 30 seconds whether something deserved my full attention
+- **Build a searchable archive** of everything I'd saved — so "I know I read something about X last month" actually returns an answer
+- **Work with local AI** — so I could run it free and keep my reading history completely private
+- **Require zero manual effort** — no tagging, no categorizing, no friction
+
+For the delivery mechanism I wanted something free and low-friction. Discord fit perfectly — I already use it, I can drop links from any device in seconds, and the bot can read from a dedicated channel automatically. Discord is the input pipe, not the point.
+
+The result is a daily driver: drop links throughout the day, run the pipeline each morning, and have a summarized digest plus a searchable knowledge base of everything I've ever saved.
+
+---
+
+## What It Does
 
 Each time you run it:
 
-1. **Fetches** the last 100 messages from a Discord channel and extracts every URL
-2. **Scrapes** each page for its text content
-3. **Summarizes** it in 3–5 sentences using the AI provider of your choice (Claude, GPT, or a local Ollama model)
-4. **Saves** a dated Markdown digest file and persists everything to SQLite
-5. **Indexes** summaries into ChromaDB so you can search them later
+1. **Fetches** links you've dropped into a dedicated Discord channel
+2. **Scrapes** each page for its full text content
+3. **Summarizes** in 3–5 sentences using the AI provider of your choice — Claude, GPT-4, or a local Ollama model (fully offline, no API costs)
+4. **Saves** a dated Markdown digest and persists everything to SQLite
+5. **Indexes** summaries into ChromaDB so your entire reading history is semantically searchable
 
 A companion CLI lets you query everything you've saved:
 
-```
+```bash
 python search.py "what did I read about AI agents last week?"
 python search.py "economy articles" --top-k 20
 ```
 
-The search combines semantic similarity (ChromaDB vectors) and keyword matching (SQLite `LIKE`) so you get both conceptual relevance and exact-term recall.
+Search combines semantic similarity (ChromaDB vectors) and keyword matching (SQLite `LIKE`) — so you get both conceptual relevance and exact-term recall.
 
 ---
 
-## Why I built it
+## AI Provider Flexibility
 
-I was losing interesting articles to the Discord firehose and forgetting things I'd actually wanted to read. I wanted a personal knowledge base that:
+One of the core design goals was being able to run this entirely locally — no API costs, no data leaving your machine:
 
-- Required **zero manual effort** to populate — it reads from a channel I'm already in
-- Let me **search by meaning**, not just keywords
-- Worked with **local AI** so I could run it free after setup
-- Gave me **full data ownership** — everything lives in local files I control
+| Provider | Cost | Privacy | Quality |
+|----------|------|---------|---------|
+| Local Ollama model | Free | Full — runs on your hardware | Good (depends on model) |
+| OpenAI GPT-4 | API costs | Cloud | Excellent |
+| Anthropic Claude | API costs | Cloud | Excellent |
 
-It's now a daily driver. I run it each morning, and `search.py` has replaced my "I know I read something about X" memory.
-
----
-
-## Tech stack
-
-| Layer | Technology |
-|-------|------------|
-| Language | Python 3.11+ |
-| Persistence | SQLite (summaries + metadata), ChromaDB (vector index) |
-| Embeddings | Ollama `all-minilm` — local, 45 MB, runs on CPU |
-| AI providers | Anthropic Claude · OpenAI GPT · Ollama local LLMs |
-| Web scraping | `requests` + `BeautifulSoup` |
-| Discord | REST API v10 via `requests` (no Discord SDK needed) |
-
-Switching AI providers is a single line in `.env` — no code changes.
+Switch providers via a single config setting. For local use, any Ollama-compatible model works.
 
 ---
 
-## Setup
+## Getting Started
 
 ### Prerequisites
 
-- Python 3.11+
-- A Discord bot token with **Message Read** permission in the target channel
-- One of: an Anthropic API key, OpenAI API key, or [Ollama](https://ollama.ai) running locally
+- Python 3.10+
+- Discord Bot token (see [Discord Developer Portal](https://discord.com/developers/applications))
+- One of: Ollama installed locally, OpenAI API key, or Anthropic API key
 
-### Install
+### Setup
 
 ```bash
-git clone https://github.com/your-username/MyLinkInbox
-cd MyLinkInbox
+git clone https://github.com/ckcreativeandconsulting/my-link-inbox.git
+cd my-link-inbox
 pip install -r requirements.txt
-```
-
-### Configure
-
-```bash
 cp .env.example .env
-# Edit .env — fill in DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID, and your AI provider credentials
+# Edit .env with your Discord token and preferred AI provider
 ```
 
 ### Run
@@ -84,59 +79,55 @@ cp .env.example .env
 # Fetch and summarize today's links
 python discord_digest.py
 
-# Search everything you've saved
-python search.py "your question here"
+# Search your archive
+python search.py "your query here"
+```
+
+### Configuration
+
+```
+# Discord
+DISCORD_BOT_TOKEN=your_token_here
+DISCORD_CHANNEL_ID=your_channel_id
+
+# AI Provider — choose one
+AI_PROVIDER=ollama          # local, free
+# AI_PROVIDER=openai
+# AI_PROVIDER=anthropic
+
+# If using local Ollama
+OLLAMA_MODEL=llama3.1:8b
+
+# If using API
+OPENAI_API_KEY=your_key_here
+ANTHROPIC_API_KEY=your_key_here
 ```
 
 ---
 
-## Scripts
+## How It Fits the Bigger Picture
 
-| Script | Purpose |
-|--------|---------|
-| `discord_digest.py` | Fetch new links from Discord, summarize, save digest + DB |
-| `search.py` | Hybrid semantic + keyword search across all saved articles |
-| `retry.py` | Re-summarize entries that failed (e.g. Ollama was offline) |
-| `backfill.py` | One-time import of existing digest markdown files into SQLite |
+My Link Inbox is one of the agents in my personal AI operations system:
 
-### Retry failed summaries
-
-If Ollama was offline when the digest ran, some entries will show an error. Fix them without re-fetching Discord:
-
-```bash
-python retry.py 2026-05-28   # specific date
-python retry.py               # today
 ```
+AI Ops (Orchestrator)
+├── Job Agent        (job search automation)
+└── My Link Inbox    ← this repo
+```
+
+When run through [AI Ops](https://github.com/ckcreativeandconsulting/ai-ops), My Link Inbox is triggered on a schedule automatically — so the digest is ready each morning without any manual intervention.
 
 ---
 
-## AI / portfolio notes
+## Key Learnings
 
-This project demonstrates several applied AI engineering patterns:
-
-**Multi-model provider abstraction** — A single `providers.py` module routes summarization and RAG answers to Anthropic, OpenAI, or Ollama based on one env var. Adding a new provider is ~15 lines.
-
-**RAG pipeline** — `search.py` implements retrieval-augmented generation end to end: embed the query → vector search ChromaDB → retrieve article summaries → LLM synthesizes an answer with numbered citations.
-
-**Hybrid search** — Semantic search alone misses exact keyword matches ("RAG", "LLM", specific names). Keyword search alone misses conceptual relevance. Both run on every query; results are merged and deduplicated, semantic results ranked first.
-
-**Operational resilience** — `ensure_ollama()` auto-starts the Ollama server if it's not running, pre-warms the model into VRAM before the first article hits it, and surfaces actionable CUDA/GPU error messages with specific fix options.
-
-**Local-first design** — Embeddings run on a 45 MB model via Ollama. Summaries can run on local LLMs. The only required external service is Discord itself.
+- **Summarization prompt design is harder than it looks** — a naive "summarize this" prompt loses the specific details that make a summary actionable. The best prompts explicitly ask for the core argument, key evidence, and why it matters.
+- **Local AI is genuinely viable for this use case** — summarization doesn't require frontier model quality. A well-configured local Ollama model produces summaries good enough to make read/skip decisions, with zero API cost and full privacy.
+- **Semantic search changes how you relate to your reading history** — keyword search forces you to remember exact terms. Semantic search lets you query by concept, which is how memory actually works.
+- **Discord as infrastructure is underrated** — using it as an input pipe means the system works from any device, requires no custom app, and has zero ongoing maintenance. Sometimes the right architecture decision is the boring one.
 
 ---
 
-## Project structure
+## About
 
-```
-MyLinkInbox/
-├── discord_digest.py   # main digest script
-├── search.py           # RAG search CLI
-├── retry.py            # retry failed entries
-├── backfill.py         # import historical digests
-├── providers.py        # AI provider abstraction
-├── db.py               # SQLite persistence layer
-├── requirements.txt
-├── .env.example
-└── digests/            # generated Markdown files (gitignored)
-```
+Built by [Charles Kang](https://charleskang.com) · [LinkedIn](https://www.linkedin.com/in/ck-charleskang) · Part of the CK Creative and Consulting portfolio
