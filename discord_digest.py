@@ -35,7 +35,7 @@ load_dotenv(BASE_DIR / ".env", override=True)
 # Configuration — override with environment variables for security
 # ---------------------------------------------------------------------------
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
-CHANNEL_ID = os.environ.get("DISCORD_CHANNEL_ID", "1506358200385929438")
+CHANNEL_ID = os.environ.get("DISCORD_CHANNEL_ID", "")
 
 # How many messages to fetch (max 100 per Discord API call)
 MESSAGE_LIMIT = 100
@@ -159,6 +159,8 @@ def write_digest(entries: list[dict], output_path: str) -> None:
 def main() -> None:
     if not DISCORD_BOT_TOKEN:
         sys.exit("Error: DISCORD_BOT_TOKEN environment variable is not set.")
+    if not CHANNEL_ID:
+        sys.exit("Error: DISCORD_CHANNEL_ID environment variable is not set.")
 
     db.init_db(DB_FILE)
     migrated = db.migrate_from_json(DB_FILE, BASE_DIR / "processed_links.json")
