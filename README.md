@@ -19,7 +19,7 @@ For the delivery mechanism I wanted something free and low-friction. Discord fit
 
 The result is a daily driver: drop links throughout the day, run the pipeline each morning, and have a summarized digest plus a searchable knowledge base of everything I've ever saved.
 
-This project is also part of a broader AI orchestration system — [AI Ops](https://github.com/ckcreativeandconsulting/ai-ops) — which can schedule and trigger My Link Inbox automatically on a defined cadence.
+This project is also part of a broader AI orchestration system — [AI Ops](https://github.com/ckcreativeandconsulting/ai_ops) — which can schedule and trigger My Link Inbox automatically on a defined cadence.
 
 ---
 
