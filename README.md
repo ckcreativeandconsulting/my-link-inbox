@@ -145,7 +145,7 @@ AI Ops (Orchestrator)
 └── My Link Inbox    ← this repo
 ```
 
-When run through AI Ops, My Link Inbox is triggered on a schedule, its outputs are logged centrally, and summaries are routed automatically. See the [AI Ops repo](https://github.com/ckcreativeandconsulting/ai-ops) for details.
+When run through AI Ops, My Link Inbox is triggered on a schedule, its outputs are logged centrally, and summaries are routed automatically. See the [AI Ops repo](https://github.com/ckcreativeandconsulting/ai_ops) for details.
 
 ---
 
