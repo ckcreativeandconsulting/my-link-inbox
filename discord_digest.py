@@ -212,24 +212,27 @@ def main() -> None:
         content, title = fetch_page_text(url)
         source = urllib.parse.urlparse(url).netloc
         entry = {"url": url, **meta}
+        summary = None
         if content:
             print(f"  Summarizing...")
             try:
-                entry["summary"] = providers.summarize(url, content)
-                db.save_link(
-                    DB_FILE,
-                    url=url,
-                    date_processed=today,
-                    source=source,
-                    title=title,
-                    summary=entry["summary"],
-                    author=meta.get("author"),
-                    discord_ts=meta.get("timestamp"),
-                )
+                summary = providers.summarize(url, content)
+                entry["summary"] = summary
             except Exception as exc:
                 entry["error"] = f"Summarization failed: {exc}"
         else:
             entry["error"] = "Could not retrieve page content."
+        # Always save to DB — even on failure — so the URL won't be retried tomorrow
+        db.save_link(
+            DB_FILE,
+            url=url,
+            date_processed=today,
+            source=source,
+            title=title,
+            summary=summary,
+            author=meta.get("author"),
+            discord_ts=meta.get("timestamp"),
+        )
         entries.append(entry)
 
     os.makedirs(DIGESTS_DIR, exist_ok=True)

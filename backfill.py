@@ -42,8 +42,21 @@ def parse_digest(md_path: Path, date_processed: str) -> list[dict]:
         if not url_match:
             continue
         url = url_match.group(1)
-        # Skip error entries
+        # Error entries: record URL in DB with summary=None so they aren't retried
         if ERROR_MARKER in block:
+            prov_match = RE_PROVENANCE.search(block)
+            author     = prov_match.group(1) if prov_match else None
+            discord_ts = prov_match.group(2) if prov_match else None
+            source     = urllib.parse.urlparse(url).netloc
+            entries.append({
+                "url": url,
+                "date_processed": date_processed,
+                "source": source,
+                "title": None,
+                "summary": None,
+                "author": author,
+                "discord_ts": discord_ts,
+            })
             continue
         # Find provenance
         prov_match = RE_PROVENANCE.search(block)
@@ -83,17 +96,12 @@ def main():
     total_scanned = 0
     total_inserted = 0
     total_skipped_existing = 0
-    total_skipped_error = 0
 
     for md_path in md_files:
         # Extract date from filename: "digest-2026-05-19" -> "2026-05-19"
         date_processed = md_path.stem.replace("digest-", "")
         entries = parse_digest(md_path, date_processed)
-        # Count error entries for reporting
-        text = md_path.read_text(encoding="utf-8")
-        error_count = text.count(ERROR_MARKER)
-        total_scanned += len(entries) + error_count
-        total_skipped_error += error_count
+        total_scanned += len(entries)
 
         file_written = 0
         file_skipped = 0
@@ -106,15 +114,15 @@ def main():
 
         total_inserted += file_written
         total_skipped_existing += file_skipped
+        error_count = sum(1 for e in entries if e["summary"] is None)
         print(
-            f"  {md_path.name}: {file_written} written, "
-            f"{file_skipped} already complete, {error_count} fetch-error entries skipped"
+            f"  {md_path.name}: {file_written} written "
+            f"({error_count} fetch-error stubs), {file_skipped} already in DB"
         )
 
     print(
         f"\nDone. Scanned {total_scanned} entries across {len(md_files)} file(s): "
-        f"{total_inserted} written, {total_skipped_existing} already complete, "
-        f"{total_skipped_error} skipped (fetch errors)."
+        f"{total_inserted} written, {total_skipped_existing} already in DB."
     )
 
 
