@@ -36,6 +36,7 @@ load_dotenv(BASE_DIR / ".env", override=True)
 # ---------------------------------------------------------------------------
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 CHANNEL_ID = os.environ.get("DISCORD_CHANNEL_ID", "")
+DISCORD_USER_ID = os.environ.get("DISCORD_USER_ID", "")
 
 # How many messages to fetch (max 100 per Discord API call)
 MESSAGE_LIMIT = 100
@@ -54,6 +55,97 @@ DISCORD_API = "https://discord.com/api/v10"
 
 def discord_headers() -> dict:
     return {"Authorization": f"Bot {DISCORD_BOT_TOKEN}"}
+
+
+def open_dm_channel(user_id: str) -> str:
+    """Create or retrieve a DM channel with user_id. Returns channel_id."""
+    resp = requests.post(
+        f"{DISCORD_API}/users/@me/channels",
+        headers=discord_headers(),
+        json={"recipient_id": user_id},
+        timeout=10,
+    )
+    if not resp.ok:
+        try:
+            detail = resp.json()
+            code = detail.get("code", "?")
+            msg  = detail.get("message", resp.text)
+        except Exception:
+            code, msg = "?", resp.text
+        if code == 50007:
+            raise RuntimeError(
+                f"Discord error {code}: {msg}\n"
+                "Fix: Discord → Settings → Privacy & Safety → "
+                "turn ON 'Allow direct messages from server members'."
+            )
+        if code == 10013:
+            raise RuntimeError(
+                f"Discord error {code}: {msg}\n"
+                "Fix: check DISCORD_USER_ID in .env — enable Developer Mode in Discord, "
+                "right-click your username → Copy User ID."
+            )
+        if code == 50035:
+            field_errors = detail.get("errors", {})
+            raise RuntimeError(
+                f"Discord error {code}: {msg}\n"
+                f"Field errors: {field_errors}\n"
+                "Fix: DISCORD_USER_ID in .env must be a numeric snowflake ID, not a username.\n"
+                "How to get it: Discord → Settings → Advanced → Developer Mode ON, "
+                "then right-click your own username → Copy User ID."
+            )
+        raise RuntimeError(f"Discord error {code}: {msg}")
+    return resp.json()["id"]
+
+
+def send_dm_digest(entries: list[dict], date: str) -> None:
+    """Send the digest to DISCORD_USER_ID as DM messages (split at 2000-char limit)."""
+    if not DISCORD_USER_ID:
+        return
+
+    try:
+        channel_id = open_dm_channel(DISCORD_USER_ID)
+    except Exception as exc:
+        print(f"  [DM] Could not open DM channel: {exc}", file=sys.stderr)
+        return
+
+    msg_url = f"{DISCORD_API}/channels/{channel_id}/messages"
+
+    def post(text: str) -> None:
+        requests.post(msg_url, headers=discord_headers(), json={"content": text}, timeout=10)
+
+    successful = sum(1 for e in entries if not e.get("error"))
+    failed = len(entries) - successful
+    header = f"**\U0001f4ec My Link Inbox — {date}**\n{successful} summarized"
+    if failed:
+        header += f", {failed} failed"
+    post(header)
+
+    chunk = ""
+    for i, entry in enumerate(entries, 1):
+        if entry.get("error"):
+            block = f"**{i}.** <{entry['url']}>\n> ⚠️ {entry['error']}\n\n"
+        else:
+            provenance = ""
+            if entry.get("author"):
+                provenance = f"*{entry['author']} · {entry.get('timestamp', '')}*\n\n"
+            block = (
+                f"**{i}.** <{entry['url']}>\n"
+                f"{provenance}"
+                f"{entry.get('summary', '')}\n\n"
+                "─────────────\n\n"
+            )
+
+        if len(chunk) + len(block) > 1900:
+            if chunk.strip():
+                post(chunk.strip())
+            chunk = block
+        else:
+            chunk += block
+
+    if chunk.strip():
+        post(chunk.strip())
+
+    print(f"  DM sent ({successful} summarized, {failed} failed)")
 
 
 def fetch_messages(channel_id: str, limit: int = 100) -> list[dict]:
@@ -118,36 +210,41 @@ def fetch_page_text(url: str) -> tuple[str, str | None] | tuple[None, None]:
 # Markdown digest writer
 # ---------------------------------------------------------------------------
 
-def write_digest(entries: list[dict], output_path: str) -> None:
-    """
-    entries: list of {url, summary, author, timestamp, error}
-    """
+def _format_entry(entry: dict, index: int) -> list[str]:
+    lines = [f"## {index}. [{entry['url']}]({entry['url']})", ""]
+    if entry.get("author"):
+        lines += [f"*Shared by **{entry['author']}** on {entry['timestamp']}*", ""]
+    if entry.get("error"):
+        lines.append(f"> **Could not fetch content:** {entry['error']}")
+    else:
+        lines.append(entry["summary"])
+    lines += ["", "---", ""]
+    return lines
+
+
+def write_digest(entries: list[dict], output_path, start_index: int = 1) -> None:
+    if start_index > 1:
+        # Append to existing file: update the count in the header, add new entries
+        text = Path(output_path).read_text(encoding="utf-8")
+        total = start_index - 1 + len(entries)
+        text = re.sub(r"\*\*Links processed:\*\* \d+", f"**Links processed:** {total}", text)
+        new_lines: list[str] = []
+        for i, entry in enumerate(entries, start_index):
+            new_lines.extend(_format_entry(entry, i))
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(text.rstrip() + "\n\n" + "\n".join(new_lines))
+        return
+
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = [
-        f"# Discord Link Digest",
-        f"",
+        "# Discord Link Digest", "",
         f"**Channel:** `{CHANNEL_ID}`  ",
         f"**Generated:** {now}  ",
         f"**Links processed:** {len(entries)}",
-        f"",
-        "---",
-        "",
+        "", "---", "",
     ]
-
     for i, entry in enumerate(entries, 1):
-        lines.append(f"## {i}. [{entry['url']}]({entry['url']})")
-        lines.append(f"")
-        if entry.get("author"):
-            lines.append(f"*Shared by **{entry['author']}** on {entry['timestamp']}*")
-            lines.append(f"")
-        if entry.get("error"):
-            lines.append(f"> **Could not fetch content:** {entry['error']}")
-        else:
-            lines.append(entry["summary"])
-        lines.append(f"")
-        lines.append("---")
-        lines.append("")
-
+        lines.extend(_format_entry(entry, i))
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
@@ -237,8 +334,13 @@ def main() -> None:
 
     os.makedirs(DIGESTS_DIR, exist_ok=True)
     output_path = DIGESTS_DIR / f"digest-{today}.md"
-    write_digest(entries, output_path)
+    start_index = 1
+    if output_path.exists():
+        existing_text = output_path.read_text(encoding="utf-8")
+        start_index = len(re.findall(r"^## \d+\.", existing_text, re.MULTILINE)) + 1
+    write_digest(entries, output_path, start_index=start_index)
     print(f"\nDigest saved to: {output_path}")
+    send_dm_digest(entries, today)
 
 
 if __name__ == "__main__":
