@@ -30,6 +30,7 @@ This project is also part of a broader AI orchestration system — [AI Ops](http
 - **Summarizes** in 3–5 sentences using the AI provider of your choice — Claude, GPT-4, or a local Ollama model (fully offline, no API costs)
 - **Saves** a dated Markdown digest and persists everything to SQLite
 - **Indexes** summaries into ChromaDB so your entire reading history is semantically searchable
+- **Delivers** the digest to your phone as Discord DM messages — no laptop needed, just a notification
 
 A companion CLI lets you query everything you've saved:
 
@@ -39,6 +40,19 @@ python search.py "economy articles" --top-k 20
 ```
 
 Search combines semantic similarity (ChromaDB vectors) and keyword matching (SQLite `LIKE`) — so you get both conceptual relevance and exact-term recall.
+
+---
+
+## Discord DM Delivery
+
+After each run, the digest is sent to your Discord inbox as a series of DM messages from the bot — so it arrives on your phone as a notification without opening a laptop.
+
+To enable:
+1. In Discord: **Settings → Advanced → Developer Mode → ON**
+2. Right-click your own username anywhere → **Copy User ID**
+3. Add to `.env`: `DISCORD_USER_ID=your_numeric_id_here`
+
+DM delivery is optional — if `DISCORD_USER_ID` is not set, the script skips it silently.
 
 ---
 
@@ -111,6 +125,11 @@ python discord_digest.py
 
 # Search your archive
 python search.py "your query here"
+
+# Rebuild a day's digest from the database (e.g. if you ran the digest
+# multiple times and want one complete file, or to resend a DM)
+python rebuild_digest.py               # today
+python rebuild_digest.py 2026-06-19   # specific date
 ```
 
 ### Configuration
@@ -119,6 +138,7 @@ python search.py "your query here"
 # Discord
 DISCORD_BOT_TOKEN=your_token_here
 DISCORD_CHANNEL_ID=your_channel_id
+DISCORD_USER_ID=your_user_id      # optional — enables DM delivery to your phone
 
 # AI Provider — choose one
 AI_PROVIDER=ollama          # local, free
