@@ -33,9 +33,14 @@ _PODCAST_DOMAINS = frozenset({
     "spreaker.com",
     "soundcloud.com",
     "overcast.fm",
+    "pca.st",                # Pocket Casts short links
     "pocketcasts.com",
     "listen.pocketcasts.com",
     "podcastaddict.com",
+    "youtube.com",           # YouTube (yt-dlp handles perfectly)
+    "youtu.be",              # YouTube short links
+    "music.youtube.com",
+    "podcasts.youtube.com",
     "iheart.com",
     "stitcher.com",
     "radiopublic.com",
