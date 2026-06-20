@@ -27,6 +27,7 @@ import requests
 from bs4 import BeautifulSoup
 import db
 import providers
+import podcast
 
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env", override=True)
@@ -43,6 +44,9 @@ MESSAGE_LIMIT = 100
 
 # Max characters of page content to send to the model
 CONTENT_MAX_CHARS = 8_000
+
+# Characters of raw transcript shown in digest for quality verification (step 3)
+TRANSCRIPT_PREVIEW_CHARS = 2_000
 
 DIGESTS_DIR = BASE_DIR / "digests"
 DB_FILE = BASE_DIR / "links.db"
@@ -211,6 +215,31 @@ def fetch_page_text(url: str) -> tuple[str, str | None] | tuple[None, None]:
 # ---------------------------------------------------------------------------
 
 def _format_entry(entry: dict, index: int) -> list[str]:
+    if entry.get("type") == "podcast":
+        lines = [f"## {index}. \U0001f399️ PODCAST — [{entry['url']}]({entry['url']})", ""]
+        if entry.get("author"):
+            lines += [f"*Shared by **{entry['author']}** on {entry['timestamp']}*", ""]
+        if entry.get("error"):
+            lines.append(f"> **Could not process podcast:** {entry['error']}")
+        else:
+            meta_parts = []
+            if entry.get("duration_mins"):
+                meta_parts.append(f"~{entry['duration_mins']} min episode")
+            if entry.get("word_count"):
+                meta_parts.append(f"{entry['word_count']:,} words transcribed")
+            if meta_parts:
+                lines += [f"**{' | '.join(meta_parts)}**", ""]
+            if entry.get("transcript_preview"):
+                lines += [
+                    "*Raw transcript — verify quality before enabling summarization:*",
+                    "",
+                    entry["transcript_preview"],
+                    "...",
+                    "",
+                ]
+        lines += ["", "---", ""]
+        return lines
+
     lines = [f"## {index}. [{entry['url']}]({entry['url']})", ""]
     if entry.get("author"):
         lines += [f"*Shared by **{entry['author']}** on {entry['timestamp']}*", ""]
@@ -306,19 +335,36 @@ def main() -> None:
 
     for url, meta in url_meta.items():
         print(f"Processing: {url}")
-        content, title = fetch_page_text(url)
         source = urllib.parse.urlparse(url).netloc
         entry = {"url": url, **meta}
         summary = None
-        if content:
-            print(f"  Summarizing...")
+        title = None
+
+        if podcast.is_podcast_url(url):
             try:
-                summary = providers.summarize(url, content)
-                entry["summary"] = summary
+                transcript, title, duration_mins = podcast.fetch_podcast(url)
+                if transcript:
+                    entry["type"] = "podcast"
+                    entry["duration_mins"] = duration_mins
+                    entry["transcript_preview"] = transcript[:TRANSCRIPT_PREVIEW_CHARS]
+                    entry["word_count"] = len(transcript.split())
+                    # summary stays None — user verifies transcript quality before step 4
+                else:
+                    entry["error"] = "Could not download or transcribe podcast audio."
             except Exception as exc:
-                entry["error"] = f"Summarization failed: {exc}"
+                entry["error"] = f"Podcast processing failed: {exc}"
         else:
-            entry["error"] = "Could not retrieve page content."
+            content, title = fetch_page_text(url)
+            if content:
+                print(f"  Summarizing...")
+                try:
+                    summary = providers.summarize(url, content)
+                    entry["summary"] = summary
+                except Exception as exc:
+                    entry["error"] = f"Summarization failed: {exc}"
+            else:
+                entry["error"] = "Could not retrieve page content."
+
         # Always save to DB — even on failure — so the URL won't be retried tomorrow
         db.save_link(
             DB_FILE,

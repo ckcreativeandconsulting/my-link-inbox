@@ -4,3 +4,8 @@ chromadb==1.5.9
 openai==2.26.0
 python-dotenv==1.2.2
 requests==2.32.5
+
+# Podcast support (steps 1-3: detect, download, transcribe)
+# System requirement: ffmpeg must be installed and on PATH
+yt-dlp
+faster-whisper
