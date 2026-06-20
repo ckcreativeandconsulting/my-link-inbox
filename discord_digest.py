@@ -219,24 +219,19 @@ def _format_entry(entry: dict, index: int) -> list[str]:
         lines = [f"## {index}. \U0001f399️ PODCAST — [{entry['url']}]({entry['url']})", ""]
         if entry.get("author"):
             lines += [f"*Shared by **{entry['author']}** on {entry['timestamp']}*", ""]
+        meta_parts = []
+        if entry.get("duration_mins"):
+            meta_parts.append(f"~{entry['duration_mins']} min episode")
+        if entry.get("word_count"):
+            meta_parts.append(f"{entry['word_count']:,} words transcribed")
+        if meta_parts:
+            lines += [f"**{' | '.join(meta_parts)}**", ""]
         if entry.get("error"):
             lines.append(f"> **Could not process podcast:** {entry['error']}")
-        else:
-            meta_parts = []
-            if entry.get("duration_mins"):
-                meta_parts.append(f"~{entry['duration_mins']} min episode")
-            if entry.get("word_count"):
-                meta_parts.append(f"{entry['word_count']:,} words transcribed")
-            if meta_parts:
-                lines += [f"**{' | '.join(meta_parts)}**", ""]
             if entry.get("transcript_preview"):
-                lines += [
-                    "*Raw transcript — verify quality before enabling summarization:*",
-                    "",
-                    entry["transcript_preview"],
-                    "...",
-                    "",
-                ]
+                lines += ["", "*Transcript preview:*", "", entry["transcript_preview"], "..."]
+        else:
+            lines.append(entry["summary"])
         lines += ["", "---", ""]
         return lines
 
@@ -346,13 +341,32 @@ def main() -> None:
                 if transcript:
                     entry["type"] = "podcast"
                     entry["duration_mins"] = duration_mins
-                    entry["transcript_preview"] = transcript[:TRANSCRIPT_PREVIEW_CHARS]
                     entry["word_count"] = len(transcript.split())
-                    # summary stays None — user verifies transcript quality before step 4
+                    n_chunks = len(podcast._chunk_transcript(transcript))
+                    print(f"  Summarizing podcast ({entry['word_count']:,} words, {n_chunks} chunks)...")
+                    try:
+                        summary = podcast.summarize_transcript(transcript, title, url)
+                        entry["summary"] = summary
+                    except Exception as exc:
+                        entry["error"] = f"Podcast summarization failed: {exc}"
+                        entry["transcript_preview"] = transcript[:TRANSCRIPT_PREVIEW_CHARS]
                 else:
                     entry["error"] = "Could not download or transcribe podcast audio."
             except Exception as exc:
-                entry["error"] = f"Podcast processing failed: {exc}"
+                err_str = str(exc)
+                if "Unsupported URL" in err_str or "unsupported url" in err_str.lower():
+                    print("  [podcast] Platform not supported by yt-dlp — falling back to article scraping...")
+                    content, title = fetch_page_text(url)
+                    if content:
+                        try:
+                            summary = providers.summarize(url, content)
+                            entry["summary"] = f"[Episode description — audio not downloadable from this platform]\n\n{summary}"
+                        except Exception as exc2:
+                            entry["error"] = f"Summarization failed: {exc2}"
+                    else:
+                        entry["error"] = "Platform not supported by yt-dlp and page fetch also failed."
+                else:
+                    entry["error"] = f"Podcast processing failed: {exc}"
         else:
             content, title = fetch_page_text(url)
             if content:

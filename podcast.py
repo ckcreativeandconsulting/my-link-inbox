@@ -16,6 +16,8 @@ import tempfile
 import urllib.parse
 from pathlib import Path
 
+import providers
+
 # ---------------------------------------------------------------------------
 # URL detection
 # ---------------------------------------------------------------------------
@@ -147,6 +149,61 @@ def _transcribe(audio_path: Path) -> str:
     model = _get_model()
     segments, _ = model.transcribe(str(audio_path), beam_size=5)
     return " ".join(seg.text.strip() for seg in segments)
+
+
+# ---------------------------------------------------------------------------
+# Chunked summarization
+# ---------------------------------------------------------------------------
+
+_CHUNK_WORDS = 2500  # ~15 min of speech at ~170 wpm
+
+_CHUNK_PROMPT = (
+    "You are summarizing segment {n} of {total} from a podcast transcript.\n"
+    "Podcast: {title}\n\n"
+    "Summarize the key points, arguments, and any notable quotes from this segment "
+    "in 3–4 sentences. Begin directly without any preamble.\n\n"
+    "Transcript segment:\n{chunk}"
+)
+
+_FINAL_PROMPT = (
+    "Below are summaries of each segment of the podcast episode '{title}'.\n"
+    "Write a single cohesive 5–7 sentence summary of the full episode that captures "
+    "the main themes, key insights, and memorable takeaways. "
+    "Begin directly without any preamble.\n\n"
+    "{summaries}"
+)
+
+
+def _chunk_transcript(text: str, max_words: int = _CHUNK_WORDS) -> list[str]:
+    words = text.split()
+    return [
+        " ".join(words[i : i + max_words])
+        for i in range(0, len(words), max_words)
+    ]
+
+
+def summarize_transcript(transcript: str, title: str | None, url: str) -> str:
+    """Chunk-then-summarize a podcast transcript using the configured AI provider."""
+    label = title or url
+    chunks = _chunk_transcript(transcript)
+
+    if len(chunks) == 1:
+        return providers.complete(
+            _CHUNK_PROMPT.format(n=1, total=1, title=label, chunk=chunks[0])
+        )
+
+    chunk_summaries = []
+    for i, chunk in enumerate(chunks, 1):
+        print(f"  [podcast] Summarizing chunk {i}/{len(chunks)}...")
+        summary = providers.complete(
+            _CHUNK_PROMPT.format(n=i, total=len(chunks), title=label, chunk=chunk)
+        )
+        chunk_summaries.append(f"[Part {i}] {summary}")
+
+    print(f"  [podcast] Creating final summary ({len(chunks)} chunks -> 1)...")
+    return providers.complete(
+        _FINAL_PROMPT.format(title=label, summaries="\n\n".join(chunk_summaries))
+    )
 
 
 # ---------------------------------------------------------------------------

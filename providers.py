@@ -184,6 +184,11 @@ def _route(prompt: str) -> str:
         )
 
 
+def complete(prompt: str) -> str:
+    """Send a raw prompt to the configured AI provider and return the response."""
+    return _route(prompt)
+
+
 # ---------------------------------------------------------------------------
 # Public: summarize a web page
 # ---------------------------------------------------------------------------
